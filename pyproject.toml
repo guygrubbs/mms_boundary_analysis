@@ -1,0 +1,40 @@
+[project]
+name        = "mms-boundary-analysis"
+version     = "0.1.0"
+description = "String-of-pearls multi-species boundary-crossing toolkit for NASA's MMS mission"
+authors     = [
+  { name = "G. Grubbs", email = "g.grubbs@example.com" }
+]
+readme      = "README.md"
+license     = { file = "LICENSE" }
+requires-python = ">=3.9"
+
+# --------------------------------------------------------------------
+# Runtime dependencies  (mirrors requirements.txt but in PEP-621 form)
+# --------------------------------------------------------------------
+dependencies = [
+  "numpy>=1.25",
+  "pandas>=2.2",
+  "matplotlib>=3.8",
+  "pyspedas>=1.4",
+  "scipy>=1.11",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "black>=24.0",
+  "ruff>=0.4",
+]
+
+[project.urls]
+Homepage    = "https://github.com/your-org/mms-boundary-analysis"
+Repository  = "https://github.com/your-org/mms-boundary-analysis"
+Issues      = "https://github.com/your-org/mms-boundary-analysis/issues"
+
+# --------------------------------------------------------------------
+# build-system: use the ‘hatchling’ PEP-517 backend (lightweight)
+# --------------------------------------------------------------------
+[build-system]
+requires = ["hatchling>=1.22"]
+build-backend = "hatchling.build"
