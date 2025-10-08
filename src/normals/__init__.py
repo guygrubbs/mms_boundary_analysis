@@ -39,11 +39,13 @@ _bootstrap = import_module('.bootstrap', __package__)
 
 # Re-export the key callables
 mva_normal       = _mva.mva_normal
+angle_between    = _mva.angle_between
 timing_normal    = _timing.timing_normal
 bootstrap_angles = _bootstrap.bootstrap_angles
 
 __all__ = [
     "mva_normal",
+    "angle_between",
     "timing_normal",
     "bootstrap_angles",
 ]

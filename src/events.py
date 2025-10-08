@@ -32,7 +32,7 @@ from . import config, csv_schema
 from .io import load_mms_data, get_omni_ctx, save_csv
 from .detect import find_candidates, prune_events, classify_event
 from .normals import mva_normal, angle_between
-from .distance import delta_n_local, delta_n_shue
+from .distance import delta_n_local, delta_n_shue, shue_normal
 
 
 # ---------------------------------------------------------------------
@@ -40,6 +40,7 @@ from .distance import delta_n_local, delta_n_shue
 # ---------------------------------------------------------------------
 MVA_WINDOW_SEC = 90        # ±90 s window around current-sheet index
 MVA_WINDOW_SMP = int(MVA_WINDOW_SEC / config.CADENCE_SEC)
+THICKNESS_WINDOW_SEC = 30  # focus thickness estimate near the crossing
 
 
 # ---------------------------------------------------------------------
@@ -128,28 +129,93 @@ def run_pipeline(
 
             # ----- (b) ΔN --------------------------------------------
             r0 = np.array([np.interp(t_common[k], pos_t, pos_r[:, i])
-                           for i in range(3)])
+                           for i in range(3)], dtype=float)
             r_sc = r0                           # snapshot at cs time
-            Pd  = ev["drops"].get("Pdyn_nPa")   # filled later from IMF
-            # place-holder; actual Pd inserted below after IMF fetch
 
-            ev["delta_N_local_km"] = 0.0        # trivially zero at cs
+            t_evt = t_common[k]
+            mask = np.abs(pos_t - t_evt) <= MVA_WINDOW_SEC
+            if not np.any(mask):
+                # fall back to entire series if window sparse (e.g. edge)
+                mask = slice(None)
+
+            pos_win = pos_r[mask]
+            t_win = pos_t[mask]
+            delta_series = (
+                delta_n_local(pos_win, r0, n_loc)
+                if pos_win.size
+                else np.array([], dtype=float)
+            )
+
+            thickness = float("nan")
+            delta_at_event = float("nan")
+            if delta_series.size:
+                finite = np.isfinite(delta_series)
+                if finite.any():
+                    dN_finite = delta_series[finite]
+                    t_finite = t_win[finite]
+
+                    # Prefer samples within ±THICKNESS_WINDOW_SEC of the
+                    # crossing to avoid over-estimating ΔN from long drifts.
+                    local_mask = np.abs(t_finite - t_evt) <= THICKNESS_WINDOW_SEC
+                    if not local_mask.any():
+                        # fall back to the closest few samples around the event
+                        order = np.argsort(np.abs(t_finite - t_evt))
+                        take = min(4, order.size)
+                        local_idx = order[:take]
+                    else:
+                        local_idx = np.where(local_mask)[0]
+
+                    dN_window = dN_finite[local_idx]
+                    if dN_window.size:
+                        dN_min = float(np.nanmin(dN_window))
+                        dN_max = float(np.nanmax(dN_window))
+                        if np.isfinite(dN_min) and np.isfinite(dN_max):
+                            thickness = dN_max - dN_min
+
+                    if t_finite.size >= 2:
+                        delta_at_event = float(
+                            np.interp(
+                                t_evt,
+                                t_finite,
+                                dN_finite,
+                                left=np.nan,
+                                right=np.nan,
+                            )
+                        )
+                    if not np.isfinite(delta_at_event) and dN_finite.size:
+                        delta_at_event = float(dN_finite[-1])
+
+            ev["delta_N_local_km"] = delta_at_event
+            ev["delta_N_local_ref_km"] = thickness
             ev["delta_N_model_km"] = np.nan     # placeholder
+            ev["N_angle_ref_deg"] = np.nan
 
             # ----- (c) IMF context  ----------------------------------
             imf = get_omni_ctx(t_common[k])
             ev.update(imf)
 
             Pd = imf["Pdyn_nPa"]
-            dN_model = delta_n_shue(r_sc, n_loc, Pd, imf["Bz_nT"])
-            ev["delta_N_model_km"] = float(dN_model)
+            dN_model = delta_n_shue(r_sc, n_loc, Pd, imf["Bz_nT"], radial=False)
+            ev["delta_N_model_km"] = float(np.asarray(dN_model))
+
+            n_ref = shue_normal(r_sc, Pd, imf["Bz_nT"])
+            ev["N_angle_ref_deg"] = float(angle_between(n_loc, n_ref))
 
             # ----- (d) classification --------------------------------
-            classify_event(ev, thickness_km=0.0)   # |ΔN|=0 at cs
+            ev["layer_thickness_km"] = thickness
+            thick_for_class = thickness if np.isfinite(thickness) else None
+            if thick_for_class is None:
+                classify_event(ev)
+            else:
+                classify_event(ev, thick_for_class)
 
             # event-level meta
-            ev["event_id"] = config.make_event_id(sc_id.upper(), 
-                                                  np.datetime64(int(t_common[k]), 's'))
+            sc_label = sc_id.upper()
+            sc_suffix = sc_label.lstrip("MMS") or sc_label
+            ev["event_id"] = config.make_event_id(
+                sc_suffix,
+                np.datetime64(int(t_common[k]), "s"),
+            )
 
     # ------------------------------------------------------------------
     # write per-probe CSVs
@@ -163,9 +229,9 @@ def run_pipeline(
                 iso_time = pd.to_datetime(ev["time"], unit="s", utc=True)
                               .strftime("%Y-%m-%dT%H:%M:%SZ"),
                 delta_N_local_km      = ev["delta_N_local_km"],
-                delta_N_local_ref_km  = np.nan,           # filled later if needed
+                delta_N_local_ref_km  = ev["delta_N_local_ref_km"],
                 delta_N_model_km      = ev["delta_N_model_km"],
-                N_angle_ref_deg       = np.nan,
+                N_angle_ref_deg       = ev.get("N_angle_ref_deg", np.nan),
                 Bz_nT     = ev["Bz_nT"],
                 By_nT     = ev["By_nT"],
                 clock_deg = ev["clock_deg"],
@@ -179,10 +245,11 @@ def run_pipeline(
             rows.append(row)
 
         df = pd.DataFrame(rows, columns=csv_schema.COLUMNS)
-        df = df.astype({k: csv_schema.DTYPES[k] for k in df.columns
-                        if k in csv_schema.DTYPES})
+        dtype_map = {k: csv_schema.RESOLVED_DTYPES[k] for k in df.columns
+                     if k in csv_schema.RESOLVED_DTYPES}
+        df = df.astype(dtype_map)
         fname = f"{sc_id.upper()}_events.csv"
-        save_csv(df, out_dir / fname, compress=True)
+        save_csv(df, out_dir / fname, compress=True, silent=quiet)
 
         if not quiet:
             print(f"[events] {sc_id}: wrote {len(df)} events → {fname}.gz")

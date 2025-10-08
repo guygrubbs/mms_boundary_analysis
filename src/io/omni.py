@@ -19,7 +19,7 @@ data are cached in *data/omni.pkl* so subsequent runs start instantly.
 from __future__ import annotations
 
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Optional
 
 import numpy as np
@@ -117,11 +117,12 @@ def get_context(t: "datetime|np.datetime64|float") -> Dict[str, float]:
         clock_deg, cone_deg``.
     """
     if isinstance(t, (int, float)):
-        t_utc = datetime.fromtimestamp(float(t), tz=timezone.utc)
+        t_utc = pd.to_datetime(float(t), unit="s", utc=True)
     elif isinstance(t, np.datetime64):
-        t_utc = pd.to_datetime(str(t)).tz_convert("UTC")
+        t_utc = pd.to_datetime(t, utc=True)
     elif isinstance(t, datetime):
-        t_utc = t.astimezone(timezone.utc)
+        ts = pd.Timestamp(t)
+        t_utc = ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
     else:
         raise TypeError("Unsupported time type for get_context")
 

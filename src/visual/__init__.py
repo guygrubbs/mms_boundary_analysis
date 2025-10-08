@@ -36,19 +36,24 @@ from importlib import import_module
 # Lazy imports keep heavy matplotlib dependencies out of the critical
 # path when plotting is not requested.
 # ---------------------------------------------------------------------
-_timeseries   = import_module(".timeseries",   __package__)   # noqa: E402
-_normals_plot = import_module(".normals_plot", __package__)   # noqa: E402
-_imf_scatter  = import_module(".imf_scatter",  __package__)   # noqa: E402
+_timeseries    = import_module(".timeseries",    __package__)   # noqa: E402
+_normals_plot  = import_module(".normals_plot",  __package__)   # noqa: E402
+_imf_scatter   = import_module(".imf_scatter",   __package__)   # noqa: E402
+_spectrograms  = import_module(".spectrograms",  __package__)   # noqa: E402
 
 # ---------------------------------------------------------------------
 # Re-export public callables
 # ---------------------------------------------------------------------
-plot_timeseries = _timeseries.plot_timeseries
-plot_normals    = _normals_plot.plot_normals
-plot_imf_scatter = _imf_scatter.plot_imf_scatter
+plot_timeseries     = _timeseries.plot_timeseries
+plot_normals        = _normals_plot.plot_normals
+plot_imf_scatter    = _imf_scatter.plot_imf_scatter
+plot_fpi_spectrogram = _spectrograms.plot_fpi_spectrogram
+plot_fgm_components  = _spectrograms.plot_fgm_components
 
 __all__ = [
     "plot_timeseries",
     "plot_normals",
     "plot_imf_scatter",
+    "plot_fpi_spectrogram",
+    "plot_fgm_components",
 ]

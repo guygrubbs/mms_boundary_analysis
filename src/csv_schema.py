@@ -20,13 +20,19 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+try:  # optional dependency for string dtypes
+    import pyarrow  # type: ignore  # noqa: F401
+    _HAS_PYARROW = True
+except ImportError:  # pragma: no cover - handled gracefully
+    _HAS_PYARROW = False
+
 # ---------------------------------------------------------------------
 # Primary column list  (kept in same order as quick-look files)
 # ---------------------------------------------------------------------
 COLUMNS: list[str] = [
     "iso_time",               # ISO-8601 UTC string
     "delta_N_local_km",       # (r − r0)·N̂  from event MVA normal
-    "delta_N_local_ref_km",   # same but w.r.t. reference (global) normal
+    "delta_N_local_ref_km",   # |ΔN| layer thickness estimated locally
     "delta_N_model_km",       # Shue-98 model distance
     "N_angle_ref_deg",        # angle between local & reference normals
     "Bz_nT", "By_nT",         # upstream IMF (GSM/GSE)
@@ -58,7 +64,17 @@ DTYPES: Dict[str, str | type] = {
 }
 
 # Provide a ready-made empty DataFrame for convenience
-EMPTY_DF: pd.DataFrame = pd.DataFrame({c: pd.Series(dtype=DTYPES.get(c, "float64"))
-                                       for c in COLUMNS})
+def _resolve_dtype(col: str) -> str | type:
+    dtype = DTYPES.get(col, "float64")
+    if dtype == "string[pyarrow]" and not _HAS_PYARROW:
+        return "string"
+    return dtype
 
-__all__ = ["COLUMNS", "DTYPES", "EMPTY_DF"]
+
+RESOLVED_DTYPES: Dict[str, str | type] = {c: _resolve_dtype(c) for c in COLUMNS}
+
+EMPTY_DF: pd.DataFrame = pd.DataFrame({
+    c: pd.Series(dtype=RESOLVED_DTYPES[c]) for c in COLUMNS
+})
+
+__all__ = ["COLUMNS", "DTYPES", "RESOLVED_DTYPES", "EMPTY_DF"]

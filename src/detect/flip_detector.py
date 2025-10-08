@@ -39,10 +39,15 @@ from __future__ import annotations
 
 from typing import Dict, List
 
+import logging
+
 import numpy as np
 from pytplot import get_data
 
 from .. import config
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------
@@ -103,7 +108,17 @@ def find_candidates(
 
     for sid, entry in mms_data.items():
         t_common = entry["time_vi"]                # 4-s cadence
-        if t_common is None:
+        if t_common is None or len(t_common) == 0:
+            out[sid] = []
+            continue
+
+        if len(t_common) <= 2 * pts_lead:
+            logger.debug(
+                "%s: skipping candidate scan (series too short for ±%d window)",
+                sid,
+                pts_lead,
+            )
+            out[sid] = []
             continue
 
         # --- magnetic field (FGM) ------------------------------------------------
@@ -121,7 +136,7 @@ def find_candidates(
 
         # --- loop over interior samples -----------------------------------------
         candidates: List[dict] = []
-        for k in range(1, len(t_common) - 1):
+        for k in range(pts_lead, len(t_common) - pts_lead):
             # rotation angle
             rot = _rotation_angle(B_int[k - 1], B_int[k + 1])
             if rot < rot_thr:

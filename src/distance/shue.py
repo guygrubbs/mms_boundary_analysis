@@ -159,4 +159,94 @@ def delta_n_shue(
         return project_along_normal(r_sc, n_hat, P_dyn, Bz_nT)
 
 
-__all__ = ["shue_radius", "delta_n_shue"]
+def _shue_normal_single(
+    r_sc: np.ndarray,
+    P_dyn: float,
+    Bz_nT: float,
+    *,
+    radial_fallback: bool = True,
+) -> np.ndarray:
+    """Return outward normal of the Shue surface at *r_sc*."""
+
+    r0 = np.asarray(r_sc, dtype=float)
+    if r0.shape != (3,):
+        raise ValueError("r_sc must be a length-3 vector")
+
+    r_mag = float(np.linalg.norm(r0))
+    if r_mag == 0.0:
+        return np.array([1.0, 0.0, 0.0])
+
+    radial = r0 / r_mag
+    cos_theta = np.clip(r0[0] / r_mag, -1.0, 1.0)
+    theta = float(np.arccos(cos_theta))          # radians
+    sin_theta = float(np.sin(theta))
+
+    # Handle subsolar / tail regions where theta → 0 or π
+    if sin_theta < 1e-6:
+        return radial if radial_fallback else radial.copy()
+
+    theta_deg = np.degrees(theta)
+    r_model = shue_radius(theta_deg, P_dyn, Bz_nT)
+    alpha = config.SHUE_COEFFS["b0"] + config.SHUE_COEFFS["b1"] * Bz_nT
+
+    denom = 1.0 + cos_theta
+    if denom <= 1e-8:
+        return radial if radial_fallback else radial.copy()
+
+    dr_dtheta = r_model * alpha * sin_theta / denom
+
+    r_mag_cubed = r_mag ** 3
+    inv = 1.0 / (r_mag_cubed * sin_theta)
+    dtheta_dx = -(r0[1] ** 2 + r0[2] ** 2) * inv
+    dtheta_dy = (r0[0] * r0[1]) * inv
+    dtheta_dz = (r0[0] * r0[2]) * inv
+
+    grad = np.array([
+        r0[0] / r_mag - dr_dtheta * dtheta_dx,
+        r0[1] / r_mag - dr_dtheta * dtheta_dy,
+        r0[2] / r_mag - dr_dtheta * dtheta_dz,
+    ])
+
+    norm = np.linalg.norm(grad)
+    if norm < 1e-8:
+        return radial if radial_fallback else radial.copy()
+
+    grad /= norm
+    if np.dot(grad, radial) < 0.0:
+        grad *= -1.0
+    return grad
+
+
+def shue_normal(
+    r_sc: np.ndarray,
+    P_dyn: float | np.ndarray,
+    Bz_nT: float | np.ndarray,
+    *,
+    radial_fallback: bool = True,
+) -> np.ndarray:
+    """Normal vector (unit) of the Shue surface at spacecraft position."""
+
+    r_arr = np.asarray(r_sc, dtype=float)
+    if r_arr.ndim == 1:
+        return _shue_normal_single(r_arr, float(P_dyn), float(Bz_nT),
+                                   radial_fallback=radial_fallback)
+
+    if r_arr.ndim != 2 or r_arr.shape[-1] != 3:
+        raise ValueError("r_sc must be (N, 3) or (3,)")
+
+    P_arr = np.broadcast_to(np.asarray(P_dyn, dtype=float), r_arr.shape[:-1])
+    B_arr = np.broadcast_to(np.asarray(Bz_nT, dtype=float), r_arr.shape[:-1])
+
+    out = np.empty_like(r_arr, dtype=float)
+    for idx in np.ndindex(r_arr.shape[:-1]):
+        out[idx] = _shue_normal_single(
+            r_arr[idx],
+            float(P_arr[idx]),
+            float(B_arr[idx]),
+            radial_fallback=radial_fallback,
+        )
+
+    return out
+
+
+__all__ = ["shue_radius", "delta_n_shue", "shue_normal"]

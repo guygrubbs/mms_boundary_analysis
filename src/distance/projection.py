@@ -36,7 +36,6 @@ from typing import Tuple
 import numpy as np
 
 from .. import config
-from .shue import _theta_from_r, shue_radius
 
 
 # ---------------------------------------------------------------------
@@ -48,25 +47,47 @@ def _root_secant(
     b: float,
     args: Tuple,
     tol: float,
-    max_iter: int
+    max_iter: int,
 ) -> float | None:
+    """Bracketed secant solver with bisection safeguard."""
+
     fa = f(a, *args)
     fb = f(b, *args)
-    if fa * fb > 0:          # not bracketed
+
+    if np.isnan(fa) or np.isnan(fb):
+        return None
+    if abs(fa) < tol:
+        return a
+    if abs(fb) < tol:
+        return b
+    if fa * fb > 0:  # no sign change → not bracketed
         return None
 
     for _ in range(max_iter):
-        if abs(fb - fa) < 1e-12:   # avoid division by zero
-            break
-        c = b - fb * (b - a) / (fb - fa)   # secant step
-        fc = f(c, *args)
+        # Ensure |fa| >= |fb| so that b is our best approximation
+        if abs(fa) < abs(fb):
+            a, b = b, a
+            fa, fb = fb, fa
 
+        denom = fb - fa
+        if abs(denom) < 1e-12:
+            c = 0.5 * (a + b)
+        else:
+            c = b - fb * (b - a) / denom  # secant step
+            # keep the iterate inside the bracket
+            if not (min(a, b) <= c <= max(a, b)):
+                c = 0.5 * (a + b)
+
+        fc = f(c, *args)
+        if np.isnan(fc):
+            return None
         if abs(fc) < tol:
             return c
 
-        # maintain bracket
-        a, fa = (b, fb) if fa * fc < 0 else (a, fa)
-        b, fb = c, fc
+        if fa * fc < 0:
+            b, fb = c, fc
+        else:
+            a, fa = c, fc
 
     return None
 
@@ -105,6 +126,8 @@ def project_along_normal(
     ndarray
         Signed distances ΔN (km).  Positive ⇒ outward along *n̂*.
     """
+    from .shue import _theta_from_r, shue_radius
+
     r_sc = np.asarray(r_sc, dtype=float)
     if r_sc.shape[-1] != 3:
         raise ValueError("r_sc must be (..., 3)")
@@ -130,19 +153,54 @@ def project_along_normal(
         Pd   = float(P_dyn[idx])
         Bz   = float(Bz_nT[idx])
 
-        # simple bracketing: try ±5 R_E from current position
-        RE = 6371.0
-        s_min, s_max = -5 * RE, 5 * RE
+        f0 = f_scalar(0.0, r0, n_hat, Pd, Bz)
+        if np.isnan(f0):
+            out[idx] = np.nan
+            continue
+        if abs(f0) < tol:
+            out[idx] = 0.0
+            continue
 
-        s = _root_secant(f_scalar, s_min, s_max,
-                         args=(r0, n_hat, Pd, Bz),
-                         tol=tol, max_iter=max_iter)
+        bracket = None
+        step = 0.25 * config.RE_KM
+        max_span = 80 * config.RE_KM
+        span = step
+
+        while span <= max_span:
+            s_pos = span
+            f_pos = f_scalar(s_pos, r0, n_hat, Pd, Bz)
+            if not np.isnan(f_pos) and f0 * f_pos <= 0:
+                bracket = (0.0, s_pos)
+                break
+
+            s_neg = -span
+            f_neg = f_scalar(s_neg, r0, n_hat, Pd, Bz)
+            if not np.isnan(f_neg) and f0 * f_neg <= 0:
+                bracket = (s_neg, 0.0)
+                break
+
+            span *= 2.0
+
+        if bracket is not None:
+            s = _root_secant(
+                f_scalar,
+                bracket[0],
+                bracket[1],
+                args=(r0, n_hat, Pd, Bz),
+                tol=tol,
+                max_iter=max_iter,
+            )
+        else:
+            s = None
 
         if s is None:   # fallback radial
             theta = _theta_from_r(r0)
             dN = np.linalg.norm(r0) - shue_radius(theta, Pd, Bz)
-            warnings.warn("project_along_normal: secant failed; "
-                          "using radial difference")
+            warnings.warn(
+                "project_along_normal: bracket/solver failed; "
+                "using radial difference",
+                stacklevel=2,
+            )
             out[idx] = dN
         else:
             out[idx] = s
@@ -151,3 +209,4 @@ def project_along_normal(
 
 
 __all__ = ["project_along_normal"]
+
