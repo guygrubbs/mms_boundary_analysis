@@ -38,11 +38,13 @@ _projection = import_module('.projection', __package__)   # noqa: E402
 delta_n_local   = _local.delta_n_local
 shue_radius     = _shue.shue_radius
 delta_n_shue    = _shue.delta_n_shue      # along event normal
+shue_normal     = _shue.shue_normal
 project_along_n = _projection.project_along_normal
 
 __all__ = [
     "delta_n_local",
     "shue_radius",
     "delta_n_shue",
+    "shue_normal",
     "project_along_n",
 ]

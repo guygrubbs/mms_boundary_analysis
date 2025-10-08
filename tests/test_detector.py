@@ -13,8 +13,12 @@ Run with::
 
 from __future__ import annotations
 
+import numpy as np
+
 from mms_boundary_analysis.detect.prune import prune_candidates
 from mms_boundary_analysis.detect.classify import classify
+from mms_boundary_analysis.detect.flip_detector import find_candidates
+from mms_boundary_analysis import config
 
 
 # ---------------------------------------------------------------------
@@ -62,7 +66,7 @@ def test_classify_categories_and_cross_type() -> None:
     ev_full = {
         "drops": {"H+": 0.8, "e-": 0.8, "He+": 0.0, "O+": 0.0}
     }
-    cat_full = classify(ev_full, thickness_km=600)   # crosses boundary
+    cat_full = classify(ev_full, 600)   # crosses boundary
     assert cat_full == "MP full"
     assert ev_full["cross_type"] == "cross"
 
@@ -70,7 +74,7 @@ def test_classify_categories_and_cross_type() -> None:
     ev_skim = {
         "drops": {"H+": 0.55, "e-": 0.20, "He+": 0.1, "O+": 0.1}
     }
-    cat_skim = classify(ev_skim, thickness_km=200)   # skim
+    cat_skim = classify(ev_skim, 200)   # skim
     assert cat_skim == "MP ion-skim"
     assert ev_skim["cross_type"] == "skim"
 
@@ -94,3 +98,28 @@ def test_classify_categories_and_cross_type() -> None:
     }
     cat_unk = classify(ev_unknown)
     assert cat_unk == "unknown"
+
+
+# ---------------------------------------------------------------------
+# find_candidates edge cases
+# ---------------------------------------------------------------------
+def test_find_candidates_handles_short_series(monkeypatch) -> None:
+    """Detector should gracefully skip series shorter than ±pts window."""
+
+    t = np.arange(0.0, 40.0, config.CADENCE_SEC, dtype=float)  # < 2 * pts_lead window
+    entry = {
+        "time_vi": t,
+        "Vi": np.zeros((t.size, 3), dtype=float),
+    }
+
+    B = np.tile(np.array([[1.0, 0.0, 0.0]]), (t.size, 1))
+
+    def fake_get_data(name: str):
+        if name.endswith("fgm_b_gse_srvy_l2"):
+            return t, B
+        return t, np.ones_like(t)
+
+    monkeypatch.setattr("mms_boundary_analysis.detect.flip_detector.get_data", fake_get_data)
+
+    out = find_candidates({"mms1": entry})
+    assert out["mms1"] == []

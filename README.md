@@ -1,50 +1,36 @@
-# MMS Boundary Analysis  🛰️🛰️🛰️🛰️
+# MMS Boundary Analysis 🛰️
 
-**String-of-Pearls multi-species, multi-crossing toolkit**
-*(MMS magnetopause and boundary-layer research pipeline)*
-
----
-
-<div align="center">
-
-| build                                                              | coverage                                                         | licence |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------- | ------- |
-| ![CI](https://img.shields.io/badge/GH-Actions-passing-brightgreen) | ![cov](https://img.shields.io/badge/coverage-100%25-brightgreen) | MIT     |
-
-</div>
+**String-of-pearls multi-species, multi-crossing toolkit**
+*(Magnetospheric Multiscale (MMS) magnetopause and boundary-layer pipeline)*
 
 ---
 
-## ✨  Highlights
+## ✨ Highlights
 
-* **One-liner end-to-end**: download → detect → classify → CSV/Parquet.
-* Twin **normal estimators**
-
-  * single-SC Minimum-Variance (MVA)  *± bootstrap σ*
-  * 4-SC timing with ΔN RMS mis-fit & speed
-* **Multi-species detector** – H⁺, e⁻, He⁺, O⁺ with rotation trigger.
-* **Local vs global ΔN** – along event normal **and** Shue-98 model.
-* **Quick-look plots** – ΔN time-series, normal rose, IMF scatter.
-* **Lazy import** design – fast `import mms_boundary_analysis` even in notebooks.
-* Pure-Python **tests (pytest)** – no PySPEDAS needed for CI.
+* **End-to-end automation** – download → detect → classify → export (CSV/Parquet).
+* Dual **normal estimators** – single-spacecraft MVA with bootstrap σ and four-spacecraft timing.
+* **Physics-grounded metrics** – ΔN along the event normal and the Shue-98 magnetopause.
+* **Quick-look figures** – ΔN time series, normal roses, IMF scatter, FPI spectrograms, and FGM components.
+* **Lazy imports** – heavy packages only load when the corresponding helper is used.
 
 ---
 
-## 📦  Installation
+## 📦 Installation
 
 ```bash
 git clone https://github.com/your-org/mms-boundary-analysis.git
 cd mms-boundary-analysis
-pip install -r requirements.txt     # numpy, pandas, matplotlib, pyspedas …
+python -m venv .venv && source .venv/bin/activate  # optional but recommended
+pip install -r requirements.txt
 ```
 
-> **Tip:**  create a fresh *conda*/*venv*; PySPEDAS pulls in SpacePy.
+PySPEDAS will download SpacePy on first install; allow a few minutes for the compiled dependencies.
 
 ---
 
-## 🏃  Quick-start
+## 🏃 Quick-start
 
-### 1.  Run the full pipeline
+### 1. Run the full pipeline
 
 ```bash
 python -m mms_boundary_analysis.cli run \
@@ -54,89 +40,116 @@ python -m mms_boundary_analysis.cli run \
        --out results/
 ```
 
-*Downloads CDFs → detects events → writes one `MMS#_events.csv.gz` per probe.*
+Downloads MMS CDFs (cached under `data/cdf/`), runs detection/classification, and writes one `MMS#_events.csv.gz` per probe.
 
-### 2.  Make a ΔN plot
+### 2. Generate publication figures
 
 ```bash
 python -m mms_boundary_analysis.cli plot \
-       --csv results/MMS1_events.csv.gz results/MMS2_events.csv.gz
+       --csv results/MMS1_events.csv.gz --save dn_quicklook.png
 ```
 
-Interactive window pops up *(add `--save plot.png` for head-less save).*
-
-### 3.  Use as a library
+For plasma/field context directly from MMS archives:
 
 ```python
+from mms_boundary_analysis.visual.spectrograms import plot_fpi_spectrogram, plot_fgm_components
+
+trange = ("2019-01-27/12:00:00", "2019-01-27/13:00:00")
+plot_fpi_spectrogram("1", trange)
+plot_fgm_components("1", trange)
+```
+
+### 3. Scripted use
+
+```python
+import pandas as pd
+
 import mms_boundary_analysis as mba
 
-events = mba.run_pipeline(quiet=True)            # nested dict
-fig, ax = mba.plot_timeseries(dseries, events)   # custom dseries allowed
-fig.savefig("dN_quicklook.png", dpi=250)
+events = mba.run_pipeline(
+    trange=("2019-01-27/12:00:00", "2019-01-27/13:00:00"),
+    probes=["1"],
+    quiet=True,
+)
+
+df = pd.read_csv("results/MMS1_events.csv.gz")
+dseries = {
+    "mms1": {
+        "time": pd.to_datetime(df["iso_time"]).to_numpy("datetime64[ns]"),
+        "local": df["delta_N_local_km"].to_numpy(float),
+        "model": df["delta_N_model_km"].to_numpy(float),
+    }
+}
+
+fig, ax = mba.plot_timeseries(dseries, {"mms1": events["mms1"]})
+fig.savefig("dn_quicklook.png", dpi=250)
 ```
 
 ---
 
-## 🗂️  Repository Layout
+## 🗂️ Repository layout
 
 ```
 ├── src/
-│   ├── mms_boundary_analysis/
-│   │   ├── io/           # CDF loader, OMNI cache, CSV writer
-│   │   ├── normals/      # MVA, timing, bootstrap
-│   │   ├── distance/     # ΔN local + Shue model
-│   │   ├── detect/       # flip–density detector, prune, classify
-│   │   ├── imf_context/  # clock / cone computations
-│   │   ├── visual/       # matplotlib helpers
-│   │   ├── events.py     # pipeline orchestrator
-│   │   ├── cli.py        # command-line interface
-│   │   ├── config.py     # constants & defaults
-│   │   └── csv_schema.py # canonical column order
-│   └── ...
-├── tests/                # pytest unit tests (pure NumPy)
-├── data/                 # auto-created; CDF cache, omni.pkl
-└── notebooks/            # (empty) put your exploration here
+│   ├── __init__.py          # public API & lazy imports
+│   ├── cli.py               # command-line interface
+│   ├── config.py            # constants & defaults
+│   ├── csv_schema.py        # canonical column order
+│   ├── detect/              # candidate detection & pruning
+│   ├── distance/            # ΔN local + Shue magnetopause helpers
+│   ├── events.py            # pipeline orchestrator
+│   ├── imf_context/         # cone / clock angle helpers
+│   ├── io/                  # MMS loader, OMNI cache, writers
+│   ├── normals/             # MVA & timing normal estimators
+│   └── visual/              # plotting utilities (timeseries, spectrograms, etc.)
+├── tests/                   # pytest suite (network-enabled integration tests)
+├── docs/                    # task plan, published references
+└── requirements.txt         # runtime & test dependencies
 ```
 
----
-
-## 📖  Key Concepts
-
-| Concept              | Where implemented             | Notes                                      |
-| -------------------- | ----------------------------- | ------------------------------------------ |
-| Candidate detection  | `detect/flip_detector.py`     | ≥ 45° B-flip **and** density drop          |
-| Candidate pruning    | `detect/prune.py`             | 30 s exclusion, score = 0.6·rot + 0.4·drop |
-| Event classification | `detect/classify.py`          | *MP full*, *EDR*, *plume*, …               |
-| Normal estimation    | `normals/`                    | MVA + timing; bootstrap σ                  |
-| Distance series      | `distance/`                   | local ΔN & Shue-98 ΔN                      |
-| IMF context          | `io/omni.py` + `imf_context/` | cached 1-min OMNI                          |
+Running the pipeline will create a `data/` directory that caches MMS CDFs and OMNI lookups.
 
 ---
 
-## 🧪  Testing
+## 📖 Key references
+
+| Concept              | Implementation              | Notes                                                     |
+| -------------------- | --------------------------- | --------------------------------------------------------- |
+| Candidate detection  | `detect/flip_detector.py`   | ≥45° magnetic rotation and multi-species density drop     |
+| Event classification | `detect/classify.py`        | Magnetopause classes with cross/skim type                 |
+| Normal estimation    | `normals/`                  | Single-spacecraft MVA + four-spacecraft timing            |
+| Distance series      | `distance/`                 | Local ΔN and Shue-98 model intersections                  |
+| IMF context          | `io/omni.py` + `imf_context`| OMNI 1 min plasma/field context (cached locally)          |
+| Publication plots    | `visual/`                   | ΔN quick-look, IMF scatter, FPI spectrograms, FGM traces  |
+
+---
+
+## 🧪 Testing & data integrity
 
 ```bash
-pytest -q       # <50 ms, no external data needed
+pytest -q
 ```
 
-CI runs on every push.
+The suite exercises the real MMS and OMNI downloads. If the NASA archives are unreachable the affected tests are skipped with a clear message; rerun the suite once connectivity is restored. The published January 27, 2019 case study is replayed end-to-end and compared against the values recorded in [`docs/published_case_studies.md`](docs/published_case_studies.md).
+
+To refresh the cached inputs, remove the `data/` directory before running `pytest` or the CLI.
 
 ---
 
-## 📝  Citing
+## 📝 Citing
 
 If you use this toolkit in a publication please cite:
 
 ```
-Grubbs, G. et al. 2025,
-"MMS multi-species boundary analysis pipeline",
-Zenodo, doi:xx.xxxx/zenodo.xxxxx
+Grubbs, G. et al. (2025).
+"MMS multi-species boundary analysis pipeline".
+Zenodo. doi:xx.xxxx/zenodo.xxxxx
 ```
 
 ---
 
-## ⚖️  Licence
+## ⚖️ Licence
 
-Released under the **MIT Licence** – see `LICENSE` file.
+Released under the **MIT License** – see [`LICENSE`](LICENSE).
 
 Happy boundary hunting! 🛰️👩‍🚀🛰️👨‍🚀

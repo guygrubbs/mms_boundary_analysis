@@ -22,7 +22,7 @@ should talk to pyspedas / pytplot directly**.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
 from pyspedas import mms
@@ -80,6 +80,23 @@ def clip_window(
 # ---------------------------------------------------------------------
 # Main loader
 # ---------------------------------------------------------------------
+def _ensure_iterable(obj: str | Iterable[str]) -> List[str]:
+    """Return *obj* as a list of probe identifiers."""
+
+    if isinstance(obj, str):
+        return [obj]
+    return list(obj)
+
+
+def _parse_trange(trange: List[str]) -> Tuple[datetime, datetime]:
+    """Convert the MMS ``['YYYY-mm-dd/HH:MM:SS', '…']`` span to UTC datetimes."""
+
+    fmt = "%Y-%m-%d/%H:%M:%S"
+    start = datetime.strptime(trange[0], fmt).replace(tzinfo=timezone.utc)
+    stop = datetime.strptime(trange[1], fmt).replace(tzinfo=timezone.utc)
+    return start, stop
+
+
 def load_mms_data(
     trange: List[str] | None = None,
     probes: List[str] | None = None,
@@ -107,22 +124,29 @@ def load_mms_data(
     Returns
     -------
     dict
-        ``data['mms1']['tpos']`` etc.  Keys:
+        ``data['mms1']['time_pos']`` etc.  Keys:
 
-        * ``tpos``, ``pos``  – MEC position (km, GSE)
-        * ``tvi``, ``Vi``    – FPI DIS bulk velocity (kps, GSE)
+        * ``time_pos``, ``pos``  – MEC position (km, GSE)
+        * ``time_vi``, ``Vi``    – FPI DIS bulk velocity (kps, GSE)
 
     Notes
     -----
     *Native cadences are preserved.*  No resampling is performed.
     """
     if trange is None:
+        start_dt = config.DEFAULT_START
+        stop_dt = config.DEFAULT_STOP
         trange = [
-            config.DEFAULT_START.strftime('%Y-%m-%d/%H:%M:%S'),
-            config.DEFAULT_STOP.strftime('%Y-%m-%d/%H:%M:%S'),
+            start_dt.strftime('%Y-%m-%d/%H:%M:%S'),
+            stop_dt.strftime('%Y-%m-%d/%H:%M:%S'),
         ]
+    else:
+        start_dt, stop_dt = _parse_trange(trange)
+
     if probes is None:
         probes = config.PROBES
+
+    probes = _ensure_iterable(probes)
 
     # ---- MEC & FGM always needed ------------------------------------
     mms.mec(trange=trange, probe=probes, data_rate='srvy', level='l2', notplot=False)
@@ -158,14 +182,14 @@ def load_mms_data(
                 data_rate='fast',
                 level='l2',
                 datatype='moments',
-                notplot=True,
+                notplot=False,
             )
 
     # -----------------------------------------------------------------
     # Package results
     # -----------------------------------------------------------------
-    t0 = np.datetime64(config.DEFAULT_START)
-    t1 = np.datetime64(config.DEFAULT_STOP)
+    t0 = config.to_dt64(start_dt)
+    t1 = config.to_dt64(stop_dt)
 
     out: Dict[str, Dict[str, np.ndarray]] = {}
 
@@ -181,11 +205,23 @@ def load_mms_data(
         if tp.size == 0 or tv.size == 0:
             raise RuntimeError(f"{sid}: essential variables missing or out of window.")
 
+        # The MEC position products (e.g. ``*_mec_r_gse``) are provided in
+        # Earth radii.  Convert to kilometres so downstream distance
+        # calculations remain physically meaningful.  Some derived products
+        # may already be in kilometres, so guard with a simple magnitude check
+        # before scaling to avoid double conversion when |r| ≫ 1e3.
+        if pos.size and np.nanmax(np.abs(pos)) < 1e3:
+            pos = pos * config.RE_KM
+
         out[sid] = {
+            'time_pos': tp,
+            'pos':      pos,
+            'time_vi':  tv,
+            'Vi':       Vi,
+            # Backwards compatibility for legacy callers (to be removed
+            # once all downstream code uses the ``time_*`` keys).
             'tpos': tp,
-            'pos':  pos,
             'tvi':  tv,
-            'Vi':   Vi,
         }
 
     return out

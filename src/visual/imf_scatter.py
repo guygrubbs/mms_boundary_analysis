@@ -57,7 +57,7 @@ def _collect_points(
     events_by_sc: Dict[str, List[dict]],
     metric: str,
     color_by: str,
-) -> Tuple[np.ndarray, np.ndarray, list[str]]:
+) -> Tuple[np.ndarray, np.ndarray, List[str], List[str]]:
     """Flatten event dict → arrays of x, y (category index), colours."""
     xs, ys, cols = [], [], []
 
@@ -75,8 +75,12 @@ def _collect_points(
     # gather points
     for sc, lst in events_by_sc.items():
         for ev in lst:
-            x = ev.get(metric if metric not in ("clock", "cone") else f"{metric}_deg")
-            if x is None or np.isnan(x):
+            x_raw = ev.get(metric if metric not in ("clock", "cone") else f"{metric}_deg")
+            try:
+                x = float(x_raw)
+            except (TypeError, ValueError):
+                continue
+            if np.isnan(x):
                 continue
             cat = ev.get(color_by, "unknown")
             xs.append(float(x))
@@ -85,7 +89,7 @@ def _collect_points(
             ys.append(cat_to_y[cat] + jitter)
             cols.append(_CAT_COL.get(cat, "black"))
 
-    return np.asarray(xs), np.asarray(ys), cols, categories
+    return np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), cols, categories
 
 
 # ---------------------------------------------------------------------
@@ -126,6 +130,32 @@ def plot_imf_scatter(
         fig = ax.figure
 
     xs, ys, cols, cats = _collect_points(events_by_sc, metric, color_by)
+
+    if xs.size == 0:
+        ax.set_yticks([])
+        ax.set_ylabel(color_by.replace("_", " ").title())
+        if metric in ("clock", "cone"):
+            ax.set_xlabel(f"IMF {metric.capitalize()} angle (deg)")
+        else:
+            ax.set_xlabel(metric)
+        ax.set_xlim(0.0, 1.0)
+        ax.set_ylim(-0.5, 0.5)
+        ax.text(
+            0.5,
+            0.5,
+            "No events available",
+            transform=ax.transAxes,
+            ha="center",
+            va="center",
+            color="0.4",
+            fontsize=10,
+        )
+        if title is None:
+            title = f"{metric.capitalize()} vs {color_by.replace('_', ' ')}"
+        ax.set_title(title)
+        ax.grid(False)
+        return fig, ax
+
     ax.scatter(xs, ys, c=cols, s=40, alpha=0.8, edgecolor="k", linewidth=0.4)
 
     # y-axis ticks / labels
@@ -151,12 +181,20 @@ def plot_imf_scatter(
     labels = []
     for cat in cats:
         if cat in _CAT_COL:
-            patch = plt.Line2D([0], [0], marker="o", color="w",
-                               markerfacecolor=_CAT_COL[cat], markeredgecolor="k",
-                               markersize=8, label=cat)
+            patch = plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor=_CAT_COL[cat],
+                markeredgecolor="k",
+                markersize=8,
+                label=cat,
+            )
             handles.append(patch)
             labels.append(cat)
-    ax.legend(handles, labels, fontsize=8, frameon=True, loc="best")
+    if handles:
+        ax.legend(handles, labels, fontsize=8, frameon=True, loc="best")
 
     return fig, ax
 

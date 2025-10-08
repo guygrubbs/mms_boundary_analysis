@@ -81,7 +81,7 @@ SPECIES: Dict[str, Tuple[str, float]] = {
 SHUE_COEFFS = {
     "a0": 107.4,          # km · (nPa)^−a1
     "a1": -0.3333,        # exponent for P_dyn
-    "a2": -0.28,          # km / nT
+    "a2": 0.28,           # km / nT (negative Bz → smaller r0)
     "b0": 0.58,
     "b1": 0.007,
 }
@@ -110,7 +110,10 @@ def shue_radius(theta_deg: float, P_dyn: float, Bz_nT: float) -> float:
     r0     = a0 * (P_dyn ** a1) + a2 * Bz_nT      # subsolar standoff (km)
     alpha  = b0 + b1 * Bz_nT
     theta  = math.radians(theta_deg)
-    r_theta = r0 * ((2.0 / (1.0 + math.cos(theta))) ** alpha)
+    denom = 1.0 + math.cos(theta)
+    if denom <= 0.0:
+        denom = 1e-3
+    r_theta = r0 * ((2.0 / denom) ** alpha)
     return r_theta
 
 
@@ -121,24 +124,19 @@ EPOCH64 = np.datetime64('1970-01-01T00:00:00Z')
 
 def to_dt64(ts: datetime) -> np.datetime64:
     """UTC datetime → numpy.datetime64[ns]."""
-    return EPOCH64 + np.int64(ts.timestamp() * 1e9)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    else:
+        ts = ts.astimezone(timezone.utc)
+    return np.datetime64(int(ts.timestamp() * 1e9), 'ns')
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Output column order (shared by writer & csv_schema)
 # ──────────────────────────────────────────────────────────────────────
-CSV_COLUMNS: List[str] = [
-    'iso_time',
-    'delta_N_local_km',      # (r-r0)·N̂  (event MVA normal)
-    'delta_N_local_ref_km',  # same with reference normal
-    'delta_N_model_km',      # radial Shue (or projected) distance
-    'N_angle_ref_deg',       # angle between local & ref normal
-    'Bz_nT', 'By_nT',
-    'clock_deg', 'cone_deg',
-    'Vsw_kms', 'Pdyn_nPa',
-    'category',              # e.g. Full_MP, Skim_EDR…
-    'event_id'
-]
+from . import csv_schema as _csv_schema
+
+CSV_COLUMNS: List[str] = list(_csv_schema.COLUMNS)
 
 # ──────────────────────────────────────────────────────────────────────
 # Helper for generating an event ID

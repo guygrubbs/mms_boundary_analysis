@@ -46,6 +46,7 @@ def save_csv(
     *,
     include_index: bool = False,
     compress: bool = False,
+    silent: bool = False,
 ) -> Path:
     """
     Save *df* to ``OUTPUT_DIR / filename`` as CSV.
@@ -61,6 +62,8 @@ def save_csv(
         Whether to preserve the DataFrame index in the CSV.
     compress : bool, default ``False``
         If *True* appends ``'.gz'`` and writes gzip‐compressed CSV.
+    silent : bool, default ``False``
+        Suppress the status message so callers can operate quietly.
 
     Returns
     -------
@@ -78,7 +81,8 @@ def save_csv(
     _ensure_parent(out_path)
 
     df.to_csv(out_path, index=include_index)
-    print(f"[writer] CSV written → {out_path}")
+    if not silent:
+        print(f"[writer] CSV written → {out_path}")
     return out_path
 
 
